@@ -33,9 +33,9 @@
 */
 
 // ---------------------------- SETTINGS -------------------------------
-#define NUM_LEDS 30         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
+#define NUM_LEDS 50         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
 #define BTN_TIMEOUT 800     // button hold delay, ms
-#define BRIGHTNESS 255      // max LED brightness (0 - 255)
+#define BRIGHTNESS 50       // max LED brightness (0 - 255)
 
 #define SWING_TIMEOUT 500   // timeout between swings
 #define SWING_L_THR 150     // swing angle speed threshold
@@ -43,6 +43,18 @@
 #define STRIKE_THR 150      // hit acceleration threshold
 #define STRIKE_S_THR 320    // hard hit acceleration threshold
 #define FLASH_DELAY 80      // flash time while hit
+#define IDLE_HUM_TIME 8000  // idle or HUM soundfile length (original 9000, adafruit one 8000)
+#define SPEAKER_VOLUME 4    // 0..7      TMRpcm library
+                            // 5 --> 4.2V Pegel
+                            // 4 --> 2.2V
+                            // 3 --> 1.1V
+                            // 2 --> 0.56V
+#define TONE_AC_VOLUME 6    // 0..10
+                            // 10 --> 2.2V Pegel
+                            //  9 --> 0.4V
+                            //  8 --> 0.2V
+                            //  7 --> 0.15V
+                            //  6 --> 0.125V
 
 #define PULSE_ALLOW 1       // blade pulsation (1 - allow, 0 - disallow)
 #define PULSE_AMPL 20       // pulse amplitude
@@ -50,20 +62,22 @@
 
 #define R1 100000           // voltage divider real resistance
 #define R2 51000            // voltage divider real resistance
-#define BATTERY_SAFE 1      // battery monitoring (1 - allow, 0 - disallow)
+#define BATTERY_SAFE 0      // battery monitoring (1 - allow, 0 - disallow)
 
-#define DEBUG 0             // debug information in Serial (1 - allow, 0 - disallow)
+#define DEBUG 1             // debug information in Serial (1 - allow, 0 - disallow)
 // ---------------------------- SETTINGS -------------------------------
 
 #define LED_PIN 6
 #define BTN 3
-#define IMU_GND A1
-#define SD_GND A0
+//#define IMU_GND A1
+//#define SD_GND A0
 #define VOLT_PIN A6
 #define BTN_LED 4
+#define SD_ChipSelectPin 8
+#define SPEAKER_PIN 9 // toneAC needs Pin 9 and 10
 
 // -------------------------- LIBS ---------------------------
-#include <avr/pgmspace.h>   // PROGMEM library
+#include <avr/pgmspace.h>   // PROGMAM library
 #include <SD.h>
 #include <TMRpcm.h>         // audio from SD library
 #include "Wire.h"
@@ -74,7 +88,6 @@
 #include <EEPROM.h>
 
 CRGB leds[NUM_LEDS];
-#define SD_ChipSelectPin 10
 TMRpcm tmrpcm;
 MPU6050 accelgyro;
 // -------------------------- LIBS ---------------------------
@@ -86,7 +99,7 @@ int16_t gx, gy, gz;
 unsigned long ACC, GYR, COMPL;
 int gyroX, gyroY, gyroZ, accelX, accelY, accelZ, freq, freq_f = 20;
 float k = 0.2;
-unsigned long humTimer = -9000, mpuTimer, nowTimer;
+unsigned long humTimer = -IDLE_HUM_TIME, mpuTimer, nowTimer;
 int stopTimer;
 boolean bzzz_flag, ls_chg_state, ls_state;
 boolean btnState, btn_flag, hold_flag;
@@ -157,21 +170,21 @@ char BUFFER[10];
 
 void setup() {
   FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  FastLED.setBrightness(100);  // ~40% of LED strip brightness
+  FastLED.setBrightness(50);  // ~40% of LED strip brightness
   setAll(0, 0, 0);             // and turn it off
 
   Wire.begin();
   Serial.begin(9600);
 
-  // ---- НАСТРОЙКА ПИНОВ ----
+  // ---- Pins ----
   pinMode(BTN, INPUT_PULLUP);
-  pinMode(IMU_GND, OUTPUT);
-  pinMode(SD_GND, OUTPUT);
+  //pinMode(IMU_GND, OUTPUT);
+  //pinMode(SD_GND, OUTPUT);
   pinMode(BTN_LED, OUTPUT);
-  digitalWrite(IMU_GND, 0);
-  digitalWrite(SD_GND, 0);
-  digitalWrite(BTN_LED, 1);
-  // ---- НАСТРОЙКА ПИНОВ ----
+  //digitalWrite(IMU_GND, 0);
+  //digitalWrite(SD_GND, 0);
+  digitalWrite(BTN_LED, 1); // turn button LED on
+  // ---- Pins ----
 
   randomSeed(analogRead(2));    // starting point for random generator
 
@@ -185,14 +198,14 @@ void setup() {
   }
 
   // SD initialization
-  tmrpcm.speakerPin = 9;
-  tmrpcm.setVolume(5);
-  tmrpcm.quality(1);
+  tmrpcm.speakerPin = SPEAKER_PIN;
+  tmrpcm.setVolume(SPEAKER_VOLUME); // 0..7
+  tmrpcm.quality(2);   // 1 or 2 oversampling
   if (DEBUG) {
-    if (SD.begin(8)) Serial.println(F("SD OK"));
+    if (SD.begin(SD_ChipSelectPin)) Serial.println(F("SD OK"));
     else Serial.println(F("SD fail"));
   } else {
-    SD.begin(8);
+    SD.begin(SD_ChipSelectPin);
   }
 
   if ((EEPROM.read(0) >= 0) && (EEPROM.read(0) <= 5)) {  // check first start
@@ -266,11 +279,13 @@ void btnTick() {
       if (btn_counter == 5) {               // 5 press count
         HUMmode = !HUMmode;
         if (HUMmode) {
+          if (DEBUG) Serial.println(F("HUM Soundfile"));
           noToneAC();
           tmrpcm.play("HUM.wav");
         } else {
+          if (DEBUG) Serial.println(F("Tone AC"));
           tmrpcm.disable();
-          toneAC(freq_f);
+          toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10
         }
         eeprom_flag = 1;
       }
@@ -295,7 +310,7 @@ void on_off_sound() {
           tmrpcm.play("HUM.wav");
         } else {
           tmrpcm.disable();
-          toneAC(freq_f);
+          toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10
         }
       } else {
         if (DEBUG) Serial.println(F("LOW VOLTAGE!"));
@@ -325,8 +340,8 @@ void on_off_sound() {
     ls_chg_state = 0;
   }
 
-  if (((millis() - humTimer) > 9000) && bzzz_flag && HUMmode) {
-    tmrpcm.play("HUM.wav");
+  if (((millis() - humTimer) > IDLE_HUM_TIME) && bzzz_flag && HUMmode) {           // adjust timer for audio file length
+    if (ls_state) tmrpcm.play("HUM.wav");
     humTimer = millis();
     swing_flag = 1;
     strike_flag = 0;
@@ -337,7 +352,7 @@ void on_off_sound() {
       tmrpcm.disable();
       strike_flag = 0;
     }
-    toneAC(freq_f);
+    toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10;
     bzzTimer = millis();
   }
 }
@@ -365,7 +380,7 @@ void strikeTick() {
     if (!HUMmode)
       bzzTimer = millis() + strike_s_time[nowNumber] - FLASH_DELAY;
     else
-      humTimer = millis() - 9000 + strike_s_time[nowNumber] - FLASH_DELAY;
+      humTimer = millis() - IDLE_HUM_TIME + strike_s_time[nowNumber] - FLASH_DELAY;
     strike_flag = 1;
   }
   if (ACC >= STRIKE_S_THR) {
@@ -378,7 +393,7 @@ void strikeTick() {
     if (!HUMmode)
       bzzTimer = millis() + strike_time[nowNumber] - FLASH_DELAY;
     else
-      humTimer = millis() - 9000 + strike_time[nowNumber] - FLASH_DELAY;
+      humTimer = millis() - IDLE_HUM_TIME + strike_time[nowNumber] - FLASH_DELAY;
     strike_flag = 1;
   }
 }
@@ -392,7 +407,7 @@ void swingTick() {
         // читаем название трека из PROGMEM
         strcpy_P(BUFFER, (char*)pgm_read_word(&(swings[nowNumber])));
         tmrpcm.play(BUFFER);               
-        humTimer = millis() - 9000 + swing_time[nowNumber];
+        humTimer = millis() - IDLE_HUM_TIME + swing_time[nowNumber];
         swing_flag = 0;
         swing_timer = millis();
         swing_allow = 0;
@@ -402,7 +417,7 @@ void swingTick() {
         // читаем название трека из PROGMEM
         strcpy_P(BUFFER, (char*)pgm_read_word(&(swings_L[nowNumber])));
         tmrpcm.play(BUFFER);              
-        humTimer = millis() - 9000 + swing_time_L[nowNumber];
+        humTimer = millis() - IDLE_HUM_TIME + swing_time_L[nowNumber];
         swing_flag = 0;
         swing_timer = millis();
         swing_allow = 0;
