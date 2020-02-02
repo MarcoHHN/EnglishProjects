@@ -33,7 +33,7 @@
 */
 
 // ---------------------------- SETTINGS -------------------------------
-#define NUM_LEDS 50         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
+#define NUM_LEDS 60         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
 #define BTN_TIMEOUT 800     // button hold delay, ms
 #define BRIGHTNESS 50       // max LED brightness (0 - 255)
 
@@ -60,17 +60,15 @@
 #define PULSE_AMPL 20       // pulse amplitude
 #define PULSE_DELAY 30      // delay between pulses
 
-#define R1 100000           // voltage divider real resistance
-#define R2 51000            // voltage divider real resistance
-#define BATTERY_SAFE 0      // battery monitoring (1 - allow, 0 - disallow)
+//#define R1 100000           // voltage divider real resistance
+//#define R2 51000            // voltage divider real resistance
+//#define BATTERY_SAFE 0      // battery monitoring (1 - allow, 0 - disallow)
 
 #define DEBUG 1             // debug information in Serial (1 - allow, 0 - disallow)
 // ---------------------------- SETTINGS -------------------------------
 
 #define LED_PIN 6
 #define BTN 3
-//#define IMU_GND A1
-//#define SD_GND A0
 #define VOLT_PIN A6
 #define BTN_LED 4
 #define SD_ChipSelectPin 8
@@ -104,7 +102,7 @@ int stopTimer;
 boolean bzzz_flag, ls_chg_state, ls_state;
 boolean btnState, btn_flag, hold_flag;
 byte btn_counter;
-unsigned long btn_timer, PULSE_timer, swing_timer, swing_timeout, battery_timer, bzzTimer;
+unsigned long btn_timer, PULSE_timer, swing_timer, swing_timeout, bzzTimer;
 byte nowNumber;
 byte LEDcolor;  // 0 - red, 1 - green, 2 - blue, 3 - pink, 4 - yellow, 5 - ice blue
 byte nowColor, red, green, blue, redOffset, greenOffset, blueOffset;
@@ -170,7 +168,7 @@ char BUFFER[10];
 
 void setup() {
   FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  FastLED.setBrightness(50);  // ~40% of LED strip brightness
+  FastLED.setBrightness(BRIGHTNESS);  // ~40% of LED strip brightness
   setAll(0, 0, 0);             // and turn it off
 
   Wire.begin();
@@ -178,11 +176,7 @@ void setup() {
 
   // ---- Pins ----
   pinMode(BTN, INPUT_PULLUP);
-  //pinMode(IMU_GND, OUTPUT);
-  //pinMode(SD_GND, OUTPUT);
   pinMode(BTN_LED, OUTPUT);
-  //digitalWrite(IMU_GND, 0);
-  //digitalWrite(SD_GND, 0);
   digitalWrite(BTN_LED, 1); // turn button LED on
   // ---- Pins ----
 
@@ -218,22 +212,7 @@ void setup() {
   }
 
   setColor(nowColor);
-  byte capacity = voltage_measure();       // get battery level
-  capacity = map(capacity, 100, 0, (NUM_LEDS / 2 - 1), 1);  // convert into blade lenght
-  if (DEBUG) {
-    Serial.print(F("Battery: "));
-    Serial.println(capacity);
-  }
-
-  for (char i = 0; i <= capacity; i++) {   // show battery level
-    setPixel(i, red, green, blue);
-    setPixel((NUM_LEDS - 1 - i), red, green, blue);
-    FastLED.show();
-    delay(25);
-  }
-  delay(1000);                         // 1 second to show battery level
-  setAll(0, 0, 0);
-  FastLED.setBrightness(BRIGHTNESS);   // set bright
+  if (DEBUG) Serial.println(F("Blade ready"));
 }
 
 // --- MAIN LOOP---
@@ -244,7 +223,6 @@ void loop() {
   btnTick();
   strikeTick();
   swingTick();
-  batteryTick();
 }
 // --- MAIN LOOP---
 
@@ -297,7 +275,6 @@ void btnTick() {
 void on_off_sound() {
   if (ls_chg_state) {                // if change flag
     if (!ls_state) {                 // if GyverSaber is turned off
-      if (voltage_measure() > 10 || !BATTERY_SAFE) {
         if (DEBUG) Serial.println(F("SABER ON"));
         tmrpcm.play("ON.wav");
         delay(200);
@@ -312,15 +289,7 @@ void on_off_sound() {
           tmrpcm.disable();
           toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10
         }
-      } else {
-        if (DEBUG) Serial.println(F("LOW VOLTAGE!"));
-        for (int i = 0; i < 5; i++) {
-          digitalWrite(BTN_LED, 0);
-          delay(400);
-          digitalWrite(BTN_LED, 1);
-          delay(400);
-        }
-      }
+        
     } else {                         // if GyverSaber is turned on
       noToneAC();
       bzzz_flag = 0;
@@ -534,32 +503,4 @@ void setColor(byte color) {
       blue = 255;
       break;
   }
-}
-
-void batteryTick() {
-  if (millis() - battery_timer > 30000 && ls_state && BATTERY_SAFE) {
-    if (voltage_measure() < 15) {
-      ls_chg_state = 1;
-    }
-    battery_timer = millis();
-  }
-}
-
-byte voltage_measure() {
-  voltage = 0;
-  for (int i = 0; i < 10; i++) {    
-    voltage += (float)analogRead(VOLT_PIN) * 5 / 1023 * (R1 + R2) / R2;
-  }
-  voltage = voltage / 10;           
-  int volts = voltage / 3 * 100;    // 3 cells!!!
-  if (volts > 387)
-    return map(volts, 420, 387, 100, 77);
-  else if ((volts <= 387) && (volts > 375) )
-    return map(volts, 387, 375, 77, 54);
-  else if ((volts <= 375) && (volts > 368) )
-    return map(volts, 375, 368, 54, 31);
-  else if ((volts <= 368) && (volts > 340) )
-    return map(volts, 368, 340, 31, 8);
-  else if (volts <= 340)
-    return map(volts, 340, 260, 8, 0);
 }
