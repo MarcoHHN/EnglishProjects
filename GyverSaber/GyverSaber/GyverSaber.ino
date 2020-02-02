@@ -17,10 +17,6 @@
      Play one of 16 hit sounds, when hit
        Weak hit - short sound
        Hard hit - long "bzzzghghhdh" sound
-     After power on blade shows current battery level from 0 to 100 percent
-     Battery safe mode:
-       Battery is drain BEFORE TURNING ON: GyverSaber will not turn on, button LED will PULSE a couple of times
-       Battery is drain AFTER TURNING ON: GyverSaber will be turned off automatically
    CONTROL BUTTON:
      HOLD - turn on / turn off GyverSaber
      TRIPLE CLICK - change color (red - green - blue - yellow - pink - ice blue)
@@ -33,7 +29,8 @@
 */
 
 // ---------------------------- SETTINGS -------------------------------
-#define NUM_LEDS 60         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
+//      connect LEDs in Parallel (total 98 LEDs -> too much for memory!)
+#define NUM_LEDS 49         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
 #define BTN_TIMEOUT 800     // button hold delay, ms
 #define BRIGHTNESS 50       // max LED brightness (0 - 255)
 
@@ -58,25 +55,20 @@
 
 #define PULSE_ALLOW 1       // blade pulsation (1 - allow, 0 - disallow)
 #define PULSE_AMPL 20       // pulse amplitude
-#define PULSE_DELAY 30      // delay between pulses
-
-//#define R1 100000           // voltage divider real resistance
-//#define R2 51000            // voltage divider real resistance
-//#define BATTERY_SAFE 0      // battery monitoring (1 - allow, 0 - disallow)
+#define PULSE_DELAY 30      // delay between pulses (orig. 30)
 
 #define DEBUG 1             // debug information in Serial (1 - allow, 0 - disallow)
 // ---------------------------- SETTINGS -------------------------------
 
 #define LED_PIN 6
 #define BTN 3
-#define VOLT_PIN A6
 #define BTN_LED 4
 #define SD_ChipSelectPin 8
 #define SPEAKER_PIN 9 // toneAC needs Pin 9 and 10
 
 // -------------------------- LIBS ---------------------------
 #include <avr/pgmspace.h>   // PROGMAM library
-#include <SD.h>
+//#include <SD.h>
 #include <TMRpcm.h>         // audio from SD library
 #include "Wire.h"
 #include "I2Cdev.h"
@@ -107,7 +99,6 @@ byte nowNumber;
 byte LEDcolor;  // 0 - red, 1 - green, 2 - blue, 3 - pink, 4 - yellow, 5 - ice blue
 byte nowColor, red, green, blue, redOffset, greenOffset, blueOffset;
 boolean eeprom_flag, swing_flag, swing_allow, strike_flag, HUMmode;
-float voltage;
 int PULSEOffset;
 // ------------------------------ VARIABLES ---------------------------------
 
@@ -226,6 +217,7 @@ void loop() {
 }
 // --- MAIN LOOP---
 
+
 void btnTick() {
   btnState = !digitalRead(BTN);
   if (btnState && !btn_flag) {
@@ -238,15 +230,15 @@ void btnTick() {
     btn_flag = 0;
     hold_flag = 0;
   }
-  // если кнопка удерживается
+  // hold to turn saber on
   if (btn_flag && btnState && (millis() - btn_timer > BTN_TIMEOUT) && !hold_flag) {
     ls_chg_state = 1;                     // flag to change saber state (on/off)
     hold_flag = 1;
     btn_counter = 0;
   }
-  // если кнопка была нажата несколько раз до таймаута
+  // press multiple times
   if ((millis() - btn_timer > BTN_TIMEOUT) && (btn_counter != 0)) {
-    if (ls_state) {
+    if (ls_state) {                    // only if blade is turned on
       if (btn_counter == 3) {               // 3 press count
         nowColor++;                         // change color
         if (nowColor >= 6) nowColor = 0;
@@ -446,20 +438,18 @@ void setAll(byte red, byte green, byte blue) {
 }
 
 void light_up() {
-  for (char i = 0; i <= (NUM_LEDS / 2 - 1); i++) {        
+  for (char i = 0; i <= (NUM_LEDS - 1); i++) {        
     setPixel(i, red, green, blue);
-    setPixel((NUM_LEDS - 1 - i), red, green, blue);
     FastLED.show();
-    delay(25);
+    delay(20);
   }
 }
 
 void light_down() {
-  for (char i = (NUM_LEDS / 2 - 1); i >= 0; i--) {      
+  for (char i = (NUM_LEDS - 1); i >= 0; i--) {      
     setPixel(i, 0, 0, 0);
-    setPixel((NUM_LEDS - 1 - i), 0, 0, 0);
     FastLED.show();
-    delay(25);
+    delay(20);
   }
 }
 
