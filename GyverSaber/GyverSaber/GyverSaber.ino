@@ -13,6 +13,7 @@
        MODE 2: hum sound from SD card
          Slow swing - long hum sound (randomly from 4 sounds)
          Fast swing - short hum sound (randomly from 5 sounds)
+       Silent Mode: Press 5 Times when saber is turned off - disable all sounds
      Bright white flash when hitting
      Play one of 16 hit sounds, when hit
        Weak hit - short sound
@@ -32,7 +33,8 @@
 //      connect LEDs in Parallel (total 98 LEDs -> too much for memory!)
 #define NUM_LEDS 49         // number of microcircuits WS2811 on LED strip (note: one WS2811 controls 3 LEDs!)
 #define BTN_TIMEOUT 800     // button hold delay, ms
-#define BRIGHTNESS 50       // max LED brightness (0 - 255)
+#define BRIGHTNESS 100       // max LED brightness (0 - 255)
+#define NUM_COLORS 6        // 0 - red, 1 - blue, 2 - green, 3 - pink, 4 - yellow, 5 - ice blue, 6 - white
 
 #define SWING_TIMEOUT 500   // timeout between swings
 #define SWING_L_THR 150     // swing angle speed threshold
@@ -93,10 +95,10 @@ unsigned long humTimer = -IDLE_HUM_TIME, mpuTimer, nowTimer;
 int stopTimer;
 boolean bzzz_flag, ls_chg_state, ls_state;
 boolean btnState, btn_flag, hold_flag;
+boolean silent_mode = false;
 byte btn_counter;
 unsigned long btn_timer, PULSE_timer, swing_timer, swing_timeout, bzzTimer;
 byte nowNumber;
-byte LEDcolor;  // 0 - red, 1 - green, 2 - blue, 3 - pink, 4 - yellow, 5 - ice blue
 byte nowColor, red, green, blue, redOffset, greenOffset, blueOffset;
 boolean eeprom_flag, swing_flag, swing_allow, strike_flag, HUMmode;
 int PULSEOffset;
@@ -168,7 +170,7 @@ void setup() {
   // ---- Pins ----
   pinMode(BTN, INPUT_PULLUP);
   pinMode(BTN_LED, OUTPUT);
-  digitalWrite(BTN_LED, 1); // turn button LED on
+  digitalWrite(BTN_LED, 0); // button LED
   // ---- Pins ----
 
   randomSeed(analogRead(2));    // starting point for random generator
@@ -204,6 +206,7 @@ void setup() {
 
   setColor(nowColor);
   if (DEBUG) Serial.println(F("Blade ready"));
+  digitalWrite(BTN_LED, 1); // turn button LED on
 }
 
 // --- MAIN LOOP---
@@ -213,7 +216,7 @@ void loop() {
   on_off_sound();
   btnTick();
   strikeTick();
-  swingTick();
+  if (!silent_mode) swingTick();
 }
 // --- MAIN LOOP---
 
@@ -241,12 +244,12 @@ void btnTick() {
     if (ls_state) {                    // only if blade is turned on
       if (btn_counter == 3) {               // 3 press count
         nowColor++;                         // change color
-        if (nowColor >= 6) nowColor = 0;
+        if (nowColor >= NUM_COLORS+1) nowColor = 0;
         setColor(nowColor);
         setAll(red, green, blue);
         eeprom_flag = 1;
       }
-      if (btn_counter == 5) {               // 5 press count
+      if (btn_counter == 5 && (!silent_mode)) {               // 5 press count
         HUMmode = !HUMmode;
         if (HUMmode) {
           if (DEBUG) Serial.println(F("HUM Soundfile"));
@@ -260,15 +263,36 @@ void btnTick() {
         eeprom_flag = 1;
       }
     }
+    if (!ls_state) {  // only if blade is turned off
+      if (btn_counter == 5) {               // 5 press count --> silent mode   
+          if (DEBUG) Serial.println(F("Silent Mode"));
+          silent_mode = !silent_mode;
+          // visual feedback
+          digitalWrite(BTN_LED, 0); // turn button LED off
+          delay(250);
+          digitalWrite(BTN_LED, 1); // turn button LED on
+          delay(250);
+          digitalWrite(BTN_LED, 0); // turn button LED off
+          delay(250);
+          digitalWrite(BTN_LED, 1); // turn button LED on
+      }
+    }
     btn_counter = 0;
   }
 }
 
 void on_off_sound() {
   if (ls_chg_state) {                // if change flag
-    if (!ls_state) {                 // if GyverSaber is turned off
+    if (!ls_state) {                 // if GyverSaber is turned on
         if (DEBUG) Serial.println(F("SABER ON"));
-        tmrpcm.play("ON.wav");
+        if (!silent_mode) {
+            if (nowColor == 0) {
+              tmrpcm.play("kyloON.wav");
+            }
+            else {
+              tmrpcm.play("ON.wav");
+            }
+        }
         delay(200);
         light_up();
         delay(200);
@@ -276,16 +300,30 @@ void on_off_sound() {
         ls_state = true;               // remember that turned on
         if (HUMmode) {
           noToneAC();
-          tmrpcm.play("HUM.wav");
+          if (!silent_mode) {
+            if (nowColor == 0) {
+              tmrpcm.play("kyloHUM.wav");
+            }
+            else {
+              tmrpcm.play("HUM.wav");
+            }
+          }
         } else {
           tmrpcm.disable();
-          toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10
+          if (!silent_mode) toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10
         }
         
-    } else {                         // if GyverSaber is turned on
+    } else {                         // if GyverSaber is turned off
       noToneAC();
       bzzz_flag = 0;
-      tmrpcm.play("OFF.wav");
+      if (!silent_mode) {
+        if (nowColor == 0) {
+          tmrpcm.play("kyloOFF.wav");
+        }
+        else {
+          tmrpcm.play("OFF.wav");
+        }
+      }
       delay(300);
       light_down();
       delay(300);
@@ -301,8 +339,16 @@ void on_off_sound() {
     ls_chg_state = 0;
   }
 
+  // keep playing the idle HUM sound
   if (((millis() - humTimer) > IDLE_HUM_TIME) && bzzz_flag && HUMmode) {           // adjust timer for audio file length
-    if (ls_state) tmrpcm.play("HUM.wav");
+    if (ls_state && !silent_mode) {
+      if (nowColor == 0) {
+        tmrpcm.play("kyloHUM.wav");
+        }
+      else {
+        tmrpcm.play("HUM.wav");
+      }
+    }
     humTimer = millis();
     swing_flag = 1;
     strike_flag = 0;
@@ -313,7 +359,7 @@ void on_off_sound() {
       tmrpcm.disable();
       strike_flag = 0;
     }
-    toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10;
+    if (!silent_mode) toneAC(freq_f, TONE_AC_VOLUME); // frequency, volume 0..10;
     bzzTimer = millis();
   }
 }
@@ -321,8 +367,8 @@ void on_off_sound() {
 void randomPULSE() {
   if (PULSE_ALLOW && ls_state && (millis() - PULSE_timer > PULSE_DELAY)) {
     PULSE_timer = millis();
-    PULSEOffset = PULSEOffset * k + random(-PULSE_AMPL, PULSE_AMPL) * (1 - k);
-    if (nowColor == 0) PULSEOffset = constrain(PULSEOffset, -15, 5);
+    PULSEOffset = PULSEOffset * k + random(-PULSE_AMPL, PULSE_AMPL) * (1 - k);  // k = 0.2, PULSE_AMPL = 20
+    if (nowColor == 0) PULSEOffset = constrain(PULSEOffset, -30, 5);            // ??? bei rot andere Limits
     redOffset = constrain(red + PULSEOffset, 0, 255);
     greenOffset = constrain(green + PULSEOffset, 0, 255);
     blueOffset = constrain(blue + PULSEOffset, 0, 255);
@@ -336,7 +382,7 @@ void strikeTick() {
     nowNumber = random(8);
     // читаем название трека из PROGMEM
     strcpy_P(BUFFER, (char*)pgm_read_word(&(strikes_short[nowNumber])));
-    tmrpcm.play(BUFFER);
+    if (!silent_mode) tmrpcm.play(BUFFER);
     hit_flash();
     if (!HUMmode)
       bzzTimer = millis() + strike_s_time[nowNumber] - FLASH_DELAY;
@@ -349,7 +395,7 @@ void strikeTick() {
     nowNumber = random(8);
     // читаем название трека из PROGMEM
     strcpy_P(BUFFER, (char*)pgm_read_word(&(strikes[nowNumber])));
-    tmrpcm.play(BUFFER);
+    if (!silent_mode) tmrpcm.play(BUFFER);
     hit_flash();
     if (!HUMmode)
       bzzTimer = millis() + strike_time[nowNumber] - FLASH_DELAY;
@@ -454,14 +500,14 @@ void light_down() {
 }
 
 void hit_flash() {
-  setAll(255, 255, 255);            
+  setAll(255, 255, 255); // white flash           
   delay(FLASH_DELAY);                
   setAll(red, blue, green);        
 }
 
 void setColor(byte color) {
   switch (color) {
-    // 0 - red, 1 - green, 2 - blue, 3 - pink, 4 - yellow, 5 - ice blue
+    // 0 - red, 1 - blue, 2 - green, 3 - pink, 4 - yellow, 5 - ice blue, 6 - white
     case 0:
       red = 255;
       green = 0;
@@ -489,6 +535,11 @@ void setColor(byte color) {
       break;
     case 5:
       red = 0;
+      green = 255;
+      blue = 255;
+      break;
+    case 6:
+      red = 255;
       green = 255;
       blue = 255;
       break;
